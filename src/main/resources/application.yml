@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/postgres?useSSL=false
+    username: docker
+    password: docker
+  kafka:
+    producer:
+      batch-size: 16384
+      buffer-memory: 33554432
+      retries: 0
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
