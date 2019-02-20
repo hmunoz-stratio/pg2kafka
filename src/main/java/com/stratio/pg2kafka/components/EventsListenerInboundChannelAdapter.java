@@ -1,4 +1,4 @@
-package com.stratio.pg2kafka.integration.inbound;
+package com.stratio.pg2kafka.components;
 
 import org.springframework.integration.context.OrderlyShutdownCapable;
 import org.springframework.integration.endpoint.MessageProducerSupport;
@@ -7,18 +7,18 @@ import org.springframework.util.Assert;
 
 import io.reactiverse.reactivex.pgclient.pubsub.PgChannel;
 
-public class PostgresListenerInboundChannelAdapter extends MessageProducerSupport implements OrderlyShutdownCapable {
+public class EventsListenerInboundChannelAdapter extends MessageProducerSupport implements OrderlyShutdownCapable {
 
     private final PgChannel pgChannel;
 
-    public PostgresListenerInboundChannelAdapter(PgChannel pgChannel) {
+    public EventsListenerInboundChannelAdapter(PgChannel pgChannel) {
         Assert.notNull(pgChannel, "pgChannel must not be null");
         this.pgChannel = pgChannel;
     }
 
     @Override
     public String getComponentType() {
-        return "pglistener:inbound-channel-adapter";
+        return "eventslistener:inbound-channel-adapter";
     }
 
     @Override

@@ -16,7 +16,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ReactivePostgresConfiguration {
 
-
     @Bean
     public PgPoolOptions postgresClientPoolOptions(DataSourceProperties dataSourceProperties) {
         return PgPoolOptions
