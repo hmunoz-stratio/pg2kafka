@@ -4,6 +4,9 @@ import org.springframework.integration.context.IntegrationObjectSupport;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.Assert;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class EventCommandsHandler extends IntegrationObjectSupport {
 
     private final JdbcTemplate jdbcTemplate;
@@ -21,13 +24,15 @@ public class EventCommandsHandler extends IntegrationObjectSupport {
         return "eventCommands:handler";
     }
 
-    public void tryLock(long eventId) {
+    public void adquire(long eventId) {
+        log.debug("Adquiring event with id: {}", eventId);
         jdbcTemplate.queryForObject(
                 "SELECT id FROM " + tableName + " WHERE id = ? AND process_date IS NULL FOR UPDATE NOWAIT",
                 Long.class, eventId);
     }
 
     public void markProcessed(long eventId) {
+        log.debug("Marking as processed event with id: {}", eventId);
         jdbcTemplate.update("UPDATE " + tableName + " SET process_date = now() WHERE id = ? AND process_date IS NULL",
                 eventId);
     }

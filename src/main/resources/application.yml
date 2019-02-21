@@ -12,4 +12,7 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 events:
+  channel: events
   table-name: test.event
+  
+logging.level.com.stratio.pg2kafka: DEBUG

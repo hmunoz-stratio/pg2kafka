@@ -20,13 +20,14 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stratio.pg2kafka.components.EventCommandsHandler;
 import com.stratio.pg2kafka.components.EventForKafkaTransformer;
 import com.stratio.pg2kafka.components.EventMessageUtils;
 import com.stratio.pg2kafka.components.EventsListenerInboundChannelAdapter;
 
-import io.reactiverse.reactivex.pgclient.pubsub.PgChannel;
-import io.reactiverse.reactivex.pgclient.pubsub.PgSubscriber;
+import io.reactiverse.pgclient.PgPoolOptions;
+import io.reactiverse.reactivex.pgclient.PgPool;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -34,11 +35,6 @@ import lombok.extern.slf4j.Slf4j;
 public class PostgresListenerIntegrationConfig {
 
     public static final String IGNORE_CHANNEL_BEAN_NAME = "ignoreChannel";
-
-    @Bean
-    public PgChannel pgEventChannel(PgSubscriber pgSubscriber) {
-        return pgSubscriber.channel("events");
-    }
 
     @Bean
     public Transformer eventForKafkaTransformer(EventMessageUtils eventMessageUtils) {
@@ -52,8 +48,11 @@ public class PostgresListenerIntegrationConfig {
     }
 
     @Bean
-    public MessageProducerSupport eventsListenerInboundChannelAdapter(PgChannel pgEventChannel) {
-        EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(pgEventChannel);
+    public MessageProducerSupport eventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions, PgPool pgPool,
+            @Value("${events.channel}") String channel, @Value("${events.table-name}") String tableName,
+            EventMessageUtils eventMessageUtils, ObjectMapper objectMapper) {
+        EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(pgPoolOptions, pgPool,
+                channel, tableName, eventMessageUtils, objectMapper);
         adapter.setErrorChannelName("errorRoutingChannel");
         return adapter;
     }
@@ -67,7 +66,7 @@ public class PostgresListenerIntegrationConfig {
                 .log(Level.INFO)
                 .transform(Message.class, eventMessageUtils::enrichEventIdHeader)
                 .handle(Object.class, (p, h) -> {
-                    eventCommandsHandler.tryLock(h.get(EventMessageUtils.EVENT_ID_HEADER, Long.class));
+                    eventCommandsHandler.adquire(h.get(EventMessageUtils.EVENT_ID_HEADER, Long.class));
                     return p;
                 }, e -> e.transactional(true))
                 .transform(eventForKafkaTransformer)

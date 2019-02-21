@@ -8,8 +8,6 @@ import org.springframework.context.annotation.Configuration;
 import io.reactiverse.pgclient.PgPoolOptions;
 import io.reactiverse.reactivex.pgclient.PgClient;
 import io.reactiverse.reactivex.pgclient.PgPool;
-import io.reactiverse.reactivex.pgclient.pubsub.PgSubscriber;
-import io.vertx.reactivex.core.Vertx;
 import lombok.extern.slf4j.Slf4j;
 
 @Configuration
@@ -29,9 +27,9 @@ public class ReactivePostgresConfiguration {
         return PgClient.pool(pgPoolOptions);
     }
 
-    @Bean
-    public PgSubscriber postgresClientSubscriber(PgPoolOptions pgPoolOptions) {
-        return PgSubscriber.subscriber(Vertx.vertx(), pgPoolOptions).connect(a -> {});
-    }
+//    @Bean
+//    public PgSubscriber postgresClientSubscriber(PgPoolOptions pgPoolOptions) {
+//        return PgSubscriber.subscriber(Vertx.vertx(), pgPoolOptions).connect(a -> {});
+//    }
 
 }
