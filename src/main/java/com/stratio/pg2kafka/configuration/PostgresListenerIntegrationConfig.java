@@ -9,6 +9,7 @@ import org.springframework.integration.annotation.Router;
 import org.springframework.integration.context.IntegrationContextUtils;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
+import org.springframework.integration.dsl.MessageChannels;
 import org.springframework.integration.endpoint.MessageProducerSupport;
 import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.kafka.dsl.Kafka;
@@ -18,6 +19,7 @@ import org.springframework.integration.transformer.Transformer;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.MessageBuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -78,6 +80,11 @@ public class PostgresListenerIntegrationConfig {
                 .handle(m -> eventCommandsHandler
                         .markProcessed(m.getHeaders().get(EventMessageUtils.EVENT_ID_HEADER, Long.class)))
                 .get();
+    }
+
+    @Bean
+    public MessageChannel errorRoutingChannel() {
+        return MessageChannels.publishSubscribe().get();
     }
 
     @Bean

@@ -24,12 +24,16 @@ import io.reactiverse.reactivex.pgclient.Row;
 import io.reactiverse.reactivex.pgclient.Tuple;
 import io.reactiverse.reactivex.pgclient.pubsub.PgChannel;
 import io.reactiverse.reactivex.pgclient.pubsub.PgSubscriber;
+import io.reactivex.BackpressureOverflowStrategy;
+import io.reactivex.Flowable;
 import io.reactivex.Observable;
 import io.vertx.reactivex.core.Vertx;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class EventsListenerInboundChannelAdapter extends MessageProducerSupport implements OrderlyShutdownCapable {
+
+    private static final int DEFAULT_FETCH_SIZE = 100;
 
     private final PgPoolOptions pgPoolOptions;
     private final PgPool pgPool;
@@ -38,6 +42,7 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
     private final String tableName;
     private final EventMessageUtils eventMessageUtils;
     private final ObjectMapper objectMapper;
+    private int fetchSize = DEFAULT_FETCH_SIZE;
     private PgSubscriber pgSubscriber;
     private PgChannel pgChannel;
 
@@ -60,6 +65,11 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         this.tableName = StringUtils.substringAfter(tableName, ".");
         this.eventMessageUtils = eventMessageUtils;
         this.objectMapper = (objectMapper != null) ? objectMapper : new ObjectMapper();
+    }
+
+    public void setFetchSize(int fetchSize) {
+        Assert.isTrue(fetchSize > 0, "'fetchSize' must be positive");
+        this.fetchSize = fetchSize;
     }
 
     @Override
@@ -134,7 +144,7 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                         .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
                                 + " AS t WHERE t.process_date IS NULL ORDER BY t.id asc")
                         .flatMapObservable(preparedQuery -> {
-                            PgStream<Row> stream = preparedQuery.createStream(50, Tuple.tuple());
+                            PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.tuple());
                             return stream.toObservable();
                         })
                         .doAfterTerminate(tx::commit));
@@ -144,8 +154,8 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         pgChannel.handler(p -> {
             long eventId = eventMessageUtils.extractEventId(p);
             log.debug("eventId: {}", eventId);
-            Observable<Row> observable = eventObservable(eventId);
-            observable.blockingSubscribe(
+            Flowable<Row> flowable = eventFlowable(eventId);
+            flowable.blockingSubscribe(
                     r -> {
                         String payload = toPayload(r);
                         log.debug("Payload: {}", payload);
@@ -155,16 +165,16 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         });
     }
 
-    private Observable<Row> eventObservable(long eventId) {
+    private Flowable<Row> eventFlowable(long eventId) {
         return pgPool.rxBegin()
-                .flatMapObservable(tx -> tx
+                .flatMapPublisher(tx -> tx
                         .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
                                 + " AS t WHERE t.id <= $1 AND t.process_date IS NULL ORDER BY t.id asc")
-                        .flatMapObservable(preparedQuery -> {
-                            PgStream<Row> stream = preparedQuery.createStream(50,
-                                    Tuple.of(eventId));
-                            return stream.toObservable();
+                        .flatMapPublisher(preparedQuery -> {
+                            PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.of(eventId));
+                            return stream.toFlowable();
                         })
-                        .doAfterTerminate(tx::commit));
+                        .doAfterTerminate(tx::commit))
+                .onBackpressureLatest();
     }
 }
