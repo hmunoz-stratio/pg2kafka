@@ -1,5 +1,7 @@
 package com.stratio.pg2kafka.components;
 
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.integration.context.IntegrationObjectSupport;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.Assert;
@@ -29,6 +31,15 @@ public class EventCommandsHandler extends IntegrationObjectSupport {
         jdbcTemplate.queryForObject(
                 "SELECT id FROM " + tableName + " WHERE id = ? AND process_date IS NULL FOR UPDATE NOWAIT",
                 Long.class, eventId);
+    }
+
+    public boolean tryAdquire(long eventId) {
+        try {
+            adquire(eventId);
+        } catch (CannotAcquireLockException | EmptyResultDataAccessException e) {
+            return false;
+        }
+        return true;
     }
 
     public void markProcessed(long eventId) {

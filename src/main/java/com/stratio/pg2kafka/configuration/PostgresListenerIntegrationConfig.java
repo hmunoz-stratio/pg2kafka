@@ -59,21 +59,28 @@ public class PostgresListenerIntegrationConfig {
     }
 
     @Bean
-    public IntegrationFlow eventsListenerFlow(
-            EventCommandsHandler eventCommandsHandler, KafkaTemplate<String, String> kafkaTemplate,
-            Transformer eventForKafkaTransformer, EventMessageUtils eventMessageUtils) {
+    public IntegrationFlow eventsListenerFlow(EventCommandsHandler eventCommandsHandler,
+            KafkaTemplate<String, String> kafkaTemplate, Transformer eventForKafkaTransformer,
+            EventMessageUtils eventMessageUtils) {
         return IntegrationFlows
                 .from("eventChannel")
                 .log(Level.DEBUG, PostgresListenerIntegrationConfig.class.getName())
                 .transform(Message.class, eventMessageUtils::enrichEventIdHeader)
-                .handle(Object.class, (p, h) -> {
-                    eventCommandsHandler.adquire(h.get(EventMessageUtils.EVENT_ID_HEADER, Long.class));
-                    return p;
-                }, e -> e.transactional(true))
+                .handle(Object.class,
+                        (p, h) -> {
+                            Long eventId = h.get(EventMessageUtils.EVENT_ID_HEADER, Long.class);
+                            if (eventCommandsHandler.tryAdquire(eventId)) {
+                                return p;
+                            }
+                            log.debug("Discarted message for event id: {}. Other instance should be processing it.",
+                                    eventId);
+                            return null;
+                        },
+                        e -> e.transactional(true))
                 .transform(eventForKafkaTransformer)
                 .handle((p, h) -> {
                     Message<?> m = MessageBuilder.createMessage(p, h);
-                    Kafka.outboundChannelAdapter(kafkaTemplate).get().handleMessage(m);
+                    Kafka.outboundChannelAdapter(kafkaTemplate).sync(true).get().handleMessage(m);
                     return m;
                 })
                 .handle(m -> eventCommandsHandler

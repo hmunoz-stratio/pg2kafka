@@ -44,6 +44,7 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
     private int fetchSize = DEFAULT_FETCH_SIZE;
     private PgSubscriber pgSubscriber;
     private PgChannel pgChannel;
+    private EventHandler eventHandler;
 
     public EventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions, PgPool pgPool, String channel,
             String tableName, EventMessageUtils eventMessageUtils) {
@@ -78,19 +79,24 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
 
     @Override
     protected void onInit() {
-        pgSubscriber = PgSubscriber.subscriber(Vertx.vertx(), pgPoolOptions).connect(a -> {
-        });
+        pgSubscriber = PgSubscriber
+                .subscriber(Vertx.vertx(), pgPoolOptions)
+                .connect(a -> {
+                })
+                .reconnectPolicy(r -> {
+                    if (eventHandler != null) {
+                        eventHandler.markDesynchronized();
+                    }
+                    return 0l;
+                });
         pgChannel = pgSubscriber.channel(channel);
+        eventHandler = new EventHandler();
         super.onInit();
     }
 
     @Override
     protected void doStart() {
-        Observable<Row> pendingsObservable = pendingsObservable();
-        pendingsObservable.blockingSubscribe(
-                r -> sendMessage(MessageBuilder.withPayload(toPayload(r)).build()),
-                e -> log.error(e.getMessage(), e),
-                this::setChannelHandler);
+        eventHandler.start();
         super.doStart();
     }
 
@@ -115,52 +121,35 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         return getPhase();
     }
 
-    private String toPayload(Row row) throws IOException {
-        Map<String, Object> dataMap = objectMapper.readValue(row.getString(0),
-                new TypeReference<Map<String, Object>>() {
-                });
-        return objectMapper.writeValueAsString(
-                Collections.unmodifiableMap(Stream.<Map.Entry<String, Object>>of(
-                        entry("schema", schemaName),
-                        entry("table", tableName),
-                        entry("action", "INSERT"),
-                        entry("data", dataMap))
-                        .collect(entriesToMap())));
-    }
-
-    private <K, V> Map.Entry<K, V> entry(K key, V value) {
-        return new AbstractMap.SimpleEntry<>(key, value);
-    }
-
-    private <K, U> Collector<Map.Entry<K, U>, ?, Map<K, U>> entriesToMap() {
-        return Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue);
-    }
-
-    private Observable<Row> pendingsObservable() {
-        return pgPool.rxBegin()
-                .flatMapObservable(tx -> tx
-                        .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
-                                + " AS t WHERE t.process_date IS NULL ORDER BY t.id asc")
-                        .flatMapObservable(preparedQuery -> {
-                            PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.tuple());
-                            return stream.toObservable();
-                        })
-                        .doAfterTerminate(tx::commit));
-    }
-
-    private void setChannelHandler() {
-        pgChannel.handler(new EventHandler());
-    }
-
     class EventHandler implements Handler<String> {
 
-        private volatile boolean previous = false;
+        private volatile boolean ready = false;
+        private volatile boolean isSynchronized = false;
+
+        public void start() {
+            log.debug("Pendings processing start");
+            Observable<Row> pendingsObservable = pendingsObservable();
+            pendingsObservable.blockingSubscribe(
+                    r -> sendMessage(MessageBuilder.withPayload(toPayload(r)).build()),
+                    e -> log.error(e.getMessage(), e),
+                    () -> pgChannel.handler(this));
+            ready = true;
+            log.debug("Pendings processing finished");
+        }
+
+        public void markDesynchronized() {
+            isSynchronized = false;
+        }
 
         @Override
         public void handle(String event) {
-            if (previous) {
+            if (!ready) {
+                throw new IllegalStateException("Handler must be started before handle");
+            }
+            if (isSynchronized) {
                 sendMessage(MessageBuilder.withPayload(event).build());
             } else {
+                log.debug("Handling with desynchronized behavior");
                 long eventId = eventMessageUtils.extractEventId(event);
                 pgPool.rxBegin()
                         .flatMapObservable(tx -> tx
@@ -174,8 +163,41 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                         .subscribe(
                                 p -> sendMessage(MessageBuilder.withPayload(toPayload(p)).build()),
                                 e -> log.error(e.getMessage(), e));
-                previous = true;
+                isSynchronized = true;
             }
+        }
+
+        private Observable<Row> pendingsObservable() {
+            return pgPool.rxBegin()
+                    .flatMapObservable(tx -> tx
+                            .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
+                                    + " AS t WHERE t.process_date IS NULL ORDER BY t.id asc")
+                            .flatMapObservable(preparedQuery -> {
+                                PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.tuple());
+                                return stream.toObservable();
+                            })
+                            .doAfterTerminate(tx::commit));
+        }
+
+        private String toPayload(Row row) throws IOException {
+            Map<String, Object> dataMap = objectMapper.readValue(row.getString(0),
+                    new TypeReference<Map<String, Object>>() {
+                    });
+            return objectMapper.writeValueAsString(
+                    Collections.unmodifiableMap(Stream.<Map.Entry<String, Object>>of(
+                            entry("schema", schemaName),
+                            entry("table", tableName),
+                            entry("action", "INSERT"),
+                            entry("data", dataMap))
+                            .collect(entriesToMap())));
+        }
+
+        private <K, V> Map.Entry<K, V> entry(K key, V value) {
+            return new AbstractMap.SimpleEntry<>(key, value);
+        }
+
+        private <K, U> Collector<Map.Entry<K, U>, ?, Map<K, U>> entriesToMap() {
+            return Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue);
         }
     }
 
