@@ -24,9 +24,8 @@ import io.reactiverse.reactivex.pgclient.Row;
 import io.reactiverse.reactivex.pgclient.Tuple;
 import io.reactiverse.reactivex.pgclient.pubsub.PgChannel;
 import io.reactiverse.reactivex.pgclient.pubsub.PgSubscriber;
-import io.reactivex.BackpressureOverflowStrategy;
-import io.reactivex.Flowable;
 import io.reactivex.Observable;
+import io.vertx.core.Handler;
 import io.vertx.reactivex.core.Vertx;
 import lombok.extern.slf4j.Slf4j;
 
@@ -82,17 +81,16 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         pgSubscriber = PgSubscriber.subscriber(Vertx.vertx(), pgPoolOptions).connect(a -> {
         });
         pgChannel = pgSubscriber.channel(channel);
-
         super.onInit();
     }
 
     @Override
     protected void doStart() {
-        Observable<Row> observable = pendingsObservable();
-        observable.blockingSubscribe(
+        Observable<Row> pendingsObservable = pendingsObservable();
+        pendingsObservable.blockingSubscribe(
                 r -> sendMessage(MessageBuilder.withPayload(toPayload(r)).build()),
                 e -> log.error(e.getMessage(), e),
-                this::initChannelListen);
+                this::setChannelHandler);
         super.doStart();
     }
 
@@ -109,12 +107,12 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         if (pgSubscriber != null) {
             pgSubscriber.close();
         }
-        return 0;
+        return getPhase();
     }
 
     @Override
     public int afterShutdown() {
-        return 0;
+        return getPhase();
     }
 
     private String toPayload(Row row) throws IOException {
@@ -150,31 +148,35 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                         .doAfterTerminate(tx::commit));
     }
 
-    private void initChannelListen() {
-        pgChannel.handler(p -> {
-            long eventId = eventMessageUtils.extractEventId(p);
-            log.debug("eventId: {}", eventId);
-            Flowable<Row> flowable = eventFlowable(eventId);
-            flowable.blockingSubscribe(
-                    r -> {
-                        String payload = toPayload(r);
-                        log.debug("Payload: {}", payload);
-                        sendMessage(MessageBuilder.withPayload(payload).setCorrelationId(eventId).build());
-                    },
-                    e -> log.error(e.getMessage(), e));
-        });
+    private void setChannelHandler() {
+        pgChannel.handler(new EventHandler());
     }
 
-    private Flowable<Row> eventFlowable(long eventId) {
-        return pgPool.rxBegin()
-                .flatMapPublisher(tx -> tx
-                        .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
-                                + " AS t WHERE t.id <= $1 AND t.process_date IS NULL ORDER BY t.id asc")
-                        .flatMapPublisher(preparedQuery -> {
-                            PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.of(eventId));
-                            return stream.toFlowable();
-                        })
-                        .doAfterTerminate(tx::commit))
-                .onBackpressureLatest();
+    class EventHandler implements Handler<String> {
+
+        private volatile boolean previous = false;
+
+        @Override
+        public void handle(String event) {
+            if (previous) {
+                sendMessage(MessageBuilder.withPayload(event).build());
+            } else {
+                long eventId = eventMessageUtils.extractEventId(event);
+                pgPool.rxBegin()
+                        .flatMapObservable(tx -> tx
+                                .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
+                                        + " AS t WHERE t.id <= $1 AND t.process_date IS NULL ORDER BY t.id asc")
+                                .flatMapObservable(preparedQuery -> {
+                                    PgStream<Row> stream = preparedQuery.createStream(fetchSize, Tuple.of(eventId));
+                                    return stream.toObservable();
+                                })
+                                .doAfterTerminate(tx::commit))
+                        .subscribe(
+                                p -> sendMessage(MessageBuilder.withPayload(toPayload(p)).build()),
+                                e -> log.error(e.getMessage(), e));
+                previous = true;
+            }
+        }
     }
+
 }

@@ -9,7 +9,6 @@ import org.springframework.integration.annotation.Router;
 import org.springframework.integration.context.IntegrationContextUtils;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.integration.dsl.MessageChannels;
 import org.springframework.integration.endpoint.MessageProducerSupport;
 import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.kafka.dsl.Kafka;
@@ -19,7 +18,6 @@ import org.springframework.integration.transformer.Transformer;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.MessageBuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,16 +54,17 @@ public class PostgresListenerIntegrationConfig {
         EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(pgPoolOptions, pgPool,
                 channel, tableName, eventMessageUtils, objectMapper);
         adapter.setErrorChannelName("errorRoutingChannel");
+        adapter.setOutputChannelName("eventChannel");
         return adapter;
     }
 
     @Bean
-    public IntegrationFlow eventsListenerFlow(MessageProducerSupport messageProducerSupport,
+    public IntegrationFlow eventsListenerFlow(
             EventCommandsHandler eventCommandsHandler, KafkaTemplate<String, String> kafkaTemplate,
             Transformer eventForKafkaTransformer, EventMessageUtils eventMessageUtils) {
         return IntegrationFlows
-                .from(messageProducerSupport)
-                .log(Level.INFO)
+                .from("eventChannel")
+                .log(Level.DEBUG, PostgresListenerIntegrationConfig.class.getName())
                 .transform(Message.class, eventMessageUtils::enrichEventIdHeader)
                 .handle(Object.class, (p, h) -> {
                     eventCommandsHandler.adquire(h.get(EventMessageUtils.EVENT_ID_HEADER, Long.class));
@@ -83,11 +82,6 @@ public class PostgresListenerIntegrationConfig {
     }
 
     @Bean
-    public MessageChannel errorRoutingChannel() {
-        return MessageChannels.publishSubscribe().get();
-    }
-
-    @Bean
     @Router(inputChannel = "errorRoutingChannel")
     public MessageRouter errorRouter() {
         ErrorMessageExceptionTypeRouter router = new ErrorMessageExceptionTypeRouter();
@@ -101,7 +95,7 @@ public class PostgresListenerIntegrationConfig {
     public IntegrationFlow ignoreFlow() {
         return IntegrationFlows
                 .from(IGNORE_CHANNEL_BEAN_NAME)
-                .log(Level.INFO)
+                .log(Level.INFO, PostgresListenerIntegrationConfig.class.getName())
                 .get();
     }
 
