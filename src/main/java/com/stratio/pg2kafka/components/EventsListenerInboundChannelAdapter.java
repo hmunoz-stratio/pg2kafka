@@ -1,12 +1,7 @@
 package com.stratio.pg2kafka.components;
 
 import java.io.IOException;
-import java.util.AbstractMap;
-import java.util.Collections;
-import java.util.Map;
-import java.util.stream.Collector;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import java.io.UncheckedIOException;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.integration.context.OrderlyShutdownCapable;
@@ -14,8 +9,9 @@ import org.springframework.integration.endpoint.MessageProducerSupport;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.util.Assert;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stratio.pg2kafka.Event;
+import com.stratio.pg2kafka.Event.EventData;
 
 import io.reactiverse.pgclient.PgPoolOptions;
 import io.reactiverse.reactivex.pgclient.PgPool;
@@ -39,7 +35,6 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
     private final String channel;
     private final String schemaName;
     private final String tableName;
-    private final EventMessageUtils eventMessageUtils;
     private final ObjectMapper objectMapper;
     private int fetchSize = DEFAULT_FETCH_SIZE;
     private PgSubscriber pgSubscriber;
@@ -47,23 +42,21 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
     private EventHandler eventHandler;
 
     public EventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions, PgPool pgPool, String channel,
-            String tableName, EventMessageUtils eventMessageUtils) {
-        this(pgPoolOptions, pgPool, channel, tableName, eventMessageUtils, null);
+            String tableName) {
+        this(pgPoolOptions, pgPool, channel, tableName, null);
     }
 
     public EventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions, PgPool pgPool, String channel,
-            String tableName, EventMessageUtils eventMessageUtils, ObjectMapper objectMapper) {
+            String tableName, ObjectMapper objectMapper) {
         Assert.notNull(pgPoolOptions, "'pgPoolOptions' must not be null");
         Assert.notNull(pgPool, "'pgPool' must not be null");
         Assert.hasText(channel, "'channel' must not be null");
         Assert.hasText(tableName, "'tableName' must not be null");
-        Assert.notNull(eventMessageUtils, "'eventMessageUtils' must not be null");
         this.pgPoolOptions = pgPoolOptions;
         this.pgPool = pgPool;
         this.channel = channel;
         this.schemaName = StringUtils.contains(tableName, ".") ? StringUtils.substringBefore(tableName, ".") : "public";
         this.tableName = StringUtils.substringAfter(tableName, ".");
-        this.eventMessageUtils = eventMessageUtils;
         this.objectMapper = (objectMapper != null) ? objectMapper : new ObjectMapper();
     }
 
@@ -130,7 +123,7 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
             log.debug("Pendings processing start");
             Observable<Row> pendingsObservable = pendingsObservable();
             pendingsObservable.blockingSubscribe(
-                    r -> sendMessage(MessageBuilder.withPayload(toPayload(r)).build()),
+                    r -> sendMessage(MessageBuilder.withPayload(toEvent(r)).build()),
                     e -> log.error(e.getMessage(), e),
                     () -> pgChannel.handler(this));
             ready = true;
@@ -142,15 +135,16 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
         }
 
         @Override
-        public void handle(String event) {
+        public void handle(String payload) {
             if (!ready) {
                 throw new IllegalStateException("Handler must be started before handle");
             }
+            Event event = toEvent(payload);
             if (isSynchronized) {
                 sendMessage(MessageBuilder.withPayload(event).build());
             } else {
                 log.debug("Handling with desynchronized behavior");
-                long eventId = eventMessageUtils.extractEventId(event);
+                long eventId = event.getEventData().getId();
                 pgPool.rxBegin()
                         .flatMapObservable(tx -> tx
                                 .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName
@@ -161,7 +155,7 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                                 })
                                 .doAfterTerminate(tx::commit))
                         .subscribe(
-                                p -> sendMessage(MessageBuilder.withPayload(toPayload(p)).build()),
+                                p -> sendMessage(MessageBuilder.withPayload(toEvent(p)).build()),
                                 e -> log.error(e.getMessage(), e));
                 isSynchronized = true;
             }
@@ -179,25 +173,25 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                             .doAfterTerminate(tx::commit));
         }
 
-        private String toPayload(Row row) throws IOException {
-            Map<String, Object> dataMap = objectMapper.readValue(row.getString(0),
-                    new TypeReference<Map<String, Object>>() {
-                    });
-            return objectMapper.writeValueAsString(
-                    Collections.unmodifiableMap(Stream.<Map.Entry<String, Object>>of(
-                            entry("schema", schemaName),
-                            entry("table", tableName),
-                            entry("action", "INSERT"),
-                            entry("data", dataMap))
-                            .collect(entriesToMap())));
+        private Event toEvent(Row row) {
+            try {
+                Event event = new Event();
+                event.setSchema(schemaName);
+                event.setTable(tableName);
+                event.setAction("INSERT");
+                event.setEventData(objectMapper.readValue(row.getString(0), EventData.class));
+                return event;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
 
-        private <K, V> Map.Entry<K, V> entry(K key, V value) {
-            return new AbstractMap.SimpleEntry<>(key, value);
-        }
-
-        private <K, U> Collector<Map.Entry<K, U>, ?, Map<K, U>> entriesToMap() {
-            return Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue);
+        private Event toEvent(String payload) {
+            try {
+                return objectMapper.readValue(payload, Event.class);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
     }
 

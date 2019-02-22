@@ -1,22 +1,24 @@
 package com.stratio.pg2kafka.components;
 
+import java.util.Map;
+
 import org.springframework.integration.support.MutableMessageHeaders;
 import org.springframework.integration.transformer.AbstractTransformer;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.util.Assert;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stratio.pg2kafka.Event;
 
 public class EventForKafkaTransformer extends AbstractTransformer {
 
-    private final EventMessageUtils eventMessageUtils;
+    private final ObjectMapper objectMapper;
 
-    public EventForKafkaTransformer(EventMessageUtils eventMessageUtils) {
-        Assert.notNull(eventMessageUtils, "'eventMessageUtils' must be not null");
-        this.eventMessageUtils = eventMessageUtils;
+    public EventForKafkaTransformer(ObjectMapper objectMapper) {
+        this.objectMapper = (objectMapper != null) ? objectMapper : new ObjectMapper();
     }
 
     @Override
@@ -26,23 +28,15 @@ public class EventForKafkaTransformer extends AbstractTransformer {
 
     @Override
     protected Object doTransform(Message<?> message) throws Exception {
-        JsonNode json = eventMessageUtils.toJsonNode(message.getPayload());
+        Event event = (Event) message.getPayload();
         MessageHeaders headers = new MutableMessageHeaders(message.getHeaders());
-        headers.put(KafkaHeaders.TOPIC, extractTopic(json));
-        headers.put(KafkaHeaders.MESSAGE_KEY, extractKey(json));
-        return MessageBuilder.createMessage(extractData(json), headers);
+        headers.put(KafkaHeaders.TOPIC, event.getEventData().getTargetTopic());
+        headers.put(KafkaHeaders.MESSAGE_KEY, event.getEventData().getTargetKey());
+        return MessageBuilder.createMessage(serialize(event.getEventData().getMessage()), headers);
     }
 
-    private String extractTopic(JsonNode json) {
-        return json.get("data").get("target_topic").textValue();
-    }
-
-    private String extractKey(JsonNode json) {
-        return json.get("data").get("target_key").textValue();
-    }
-
-    private String extractData(JsonNode json) {
-        return eventMessageUtils.serialize(json.get("data").get("data"));
+    private String serialize(Map<String, Object> message) throws JsonProcessingException {
+        return objectMapper.writeValueAsString(message);
     }
 
 }
