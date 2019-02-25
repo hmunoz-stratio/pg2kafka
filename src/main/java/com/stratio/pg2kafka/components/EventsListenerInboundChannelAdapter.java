@@ -140,11 +140,11 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
                 throw new IllegalStateException("Handler must be started before handle");
             }
             Event event = toEvent(payload);
+            long eventId = event.getEventData().getId();
             if (isSynchronized) {
                 sendMessage(MessageBuilder.withPayload(event).build());
             } else {
-                log.debug("Handling with desynchronized behavior");
-                long eventId = event.getEventData().getId();
+                log.debug("Handling event '{}' with desynchronized behavior", eventId);
                 pgPool.rxBegin()
                         .flatMapObservable(tx -> tx
                                 .rxPrepare("SELECT row_to_json(t)::text FROM " + schemaName + "." + tableName

@@ -11,7 +11,7 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
-application:
+pg2kafka:
   events-source:
     channel: events
     table-name: test.event

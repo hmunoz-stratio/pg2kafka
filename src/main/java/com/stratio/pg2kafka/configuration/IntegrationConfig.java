@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.integration.endpoint.MessageProducerSupport;
 import org.springframework.integration.handler.LoggingHandler.Level;
 import org.springframework.integration.kafka.dsl.Kafka;
 import org.springframework.integration.support.MutableMessageHeaders;
@@ -33,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class IntegrationConfig {
 
     @Autowired
-    ApplicationProperties applicationProperties;
+    Pg2KafkaProperties applicationProperties;
 
     @Bean
     public EventCommandsHandler eventCommandsHandler(JdbcTemplate jdbcTemplate) {
@@ -41,7 +40,8 @@ public class IntegrationConfig {
     }
 
     @Bean
-    public MessageProducerSupport eventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions, PgPool pgPool,
+    public EventsListenerInboundChannelAdapter eventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions,
+            PgPool pgPool,
             ObjectMapper objectMapper) {
         EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(pgPoolOptions, pgPool,
                 applicationProperties.getEventsSource().getChannel(),
