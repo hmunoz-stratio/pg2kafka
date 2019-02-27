@@ -7,26 +7,27 @@ import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
 import org.springframework.integration.handler.LoggingHandler.Level;
-import org.springframework.integration.kafka.dsl.Kafka;
 import org.springframework.integration.support.MutableMessageHeaders;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.MessagingException;
+import org.springframework.messaging.support.ErrorMessage;
 import org.springframework.messaging.support.MessageBuilder;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stratio.pg2kafka.Event;
 import com.stratio.pg2kafka.components.EventCommandsHandler;
-import com.stratio.pg2kafka.components.EventForKafkaTransformer;
 import com.stratio.pg2kafka.components.EventHeaders;
+import com.stratio.pg2kafka.components.EventToKafkaHandler;
 import com.stratio.pg2kafka.components.EventsListenerInboundChannelAdapter;
 
 import io.reactiverse.pgclient.PgPoolOptions;
 import io.reactiverse.reactivex.pgclient.PgPool;
-import lombok.extern.slf4j.Slf4j;
+import io.reactiverse.reactivex.pgclient.PgTransaction;
+import io.vertx.core.VertxOptions;
+import reactor.core.publisher.Mono;
 
-@Slf4j
 @Configuration
 @EnableIntegration
 public class IntegrationConfig {
@@ -35,16 +36,15 @@ public class IntegrationConfig {
     Pg2KafkaProperties applicationProperties;
 
     @Bean
-    public EventCommandsHandler eventCommandsHandler(JdbcTemplate jdbcTemplate) {
-        return new EventCommandsHandler(jdbcTemplate, applicationProperties.getEventsSource().getTableName());
+    public EventCommandsHandler eventCommandsHandler() {
+        return new EventCommandsHandler(applicationProperties.getEventsSource().getTableName());
     }
 
     @Bean
-    public EventsListenerInboundChannelAdapter eventsListenerInboundChannelAdapter(PgPoolOptions pgPoolOptions,
-            PgPool pgPool,
-            ObjectMapper objectMapper) {
-        EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(pgPoolOptions, pgPool,
-                applicationProperties.getEventsSource().getChannel(),
+    public EventsListenerInboundChannelAdapter eventsListenerInboundChannelAdapter(VertxOptions vertxOptions,
+            PgPoolOptions pgPoolOptions, PgPool pgPool, ObjectMapper objectMapper) {
+        EventsListenerInboundChannelAdapter adapter = new EventsListenerInboundChannelAdapter(vertxOptions,
+                pgPoolOptions, pgPool, applicationProperties.getEventsSource().getChannel(),
                 applicationProperties.getEventsSource().getTableName(), objectMapper);
         adapter.setErrorChannelName("errorChannel");
         adapter.setOutputChannelName("eventChannel");
@@ -52,35 +52,72 @@ public class IntegrationConfig {
     }
 
     @Bean
+    public EventToKafkaHandler eventToKafkaHandler(KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper) {
+        return new EventToKafkaHandler(kafkaTemplate, objectMapper);
+    }
+
+    @Bean
     public IntegrationFlow eventsListenerFlow(EventCommandsHandler eventCommandsHandler,
-            KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+            EventToKafkaHandler eventToKafkaHandler, PgPool pgPool) {
         return IntegrationFlows
                 .from("eventChannel")
                 .transform(Message.class, m -> {
                     MessageHeaders mutableHeaders = new MutableMessageHeaders(m.getHeaders());
                     Event payload = (Event) m.getPayload();
                     mutableHeaders.put(EventHeaders.EVENT_ID_HEADER, payload.getEventData().getId());
+                    mutableHeaders.put(EventHeaders.EVENT_TX, pgPool.rxBegin().blockingGet());
                     return MessageBuilder.createMessage(payload, mutableHeaders);
                 })
                 .log(Level.DEBUG, IntegrationConfig.class.getName())
                 .handle(Event.class,
                         (p, h) -> {
-                            long eventId = h.get(EventHeaders.EVENT_ID_HEADER, Long.class);
-                            if (eventCommandsHandler.tryAdquire(eventId)) {
-                                return p;
-                            }
-                            log.debug("Discarted message for event id: {}. Other instance should be processing it.",
-                                    eventId);
-                            return null;
-                        },
-                        e -> e.transactional(true))
-                .transform(new EventForKafkaTransformer(objectMapper)).handle((p, h) -> {
-                    Message<?> m = MessageBuilder.createMessage(p, h);
-                    Kafka.outboundChannelAdapter(kafkaTemplate).sync(true).get().handleMessage(m);
-                    return m;
+                            final long eventId = h.get(EventHeaders.EVENT_ID_HEADER, Long.class);
+                            PgTransaction tx = (PgTransaction) h.get(EventHeaders.EVENT_TX);
+                            Mono<Object> mono = eventCommandsHandler.tryAcquire(tx, eventId)
+                                    .flatMap(b -> {
+                                        if (b) {
+                                            return Mono.just(p);
+                                        }
+                                        tx.commit();
+                                        return Mono.empty();
+                                    });
+                            return mono.block();
+                        })
+
+                .handle(eventToKafkaHandler)
+                .handle(Event.class, (p, h) -> {
+                    final long eventId = h.get(EventHeaders.EVENT_ID_HEADER, Long.class);
+                    PgTransaction tx = (PgTransaction) h.get(EventHeaders.EVENT_TX);
+                    Mono<Event> mono = eventCommandsHandler.markProcessed(tx, eventId)
+                            .thenReturn(p);
+                    return mono.block();
                 })
-                .handle(m -> eventCommandsHandler
-                        .markProcessed(m.getHeaders().get(EventHeaders.EVENT_ID_HEADER, Long.class)))
+                .handle(m -> {
+                    PgTransaction tx = (PgTransaction) m.getHeaders().get(EventHeaders.EVENT_TX);
+                    tx.commit();
+                })
+                .get();
+    }
+
+    @Bean
+    public IntegrationFlow rollbackFlow() {
+        return IntegrationFlows
+                .from("errorChannel")
+                .handle(ErrorMessage.class, (p, h) -> {
+                    Throwable throwable = p.getPayload();
+                    if (throwable instanceof MessagingException) {
+                        MessagingException messagingException = (MessagingException) throwable;
+                        Message<?> failedMessage = messagingException.getFailedMessage();
+                        if (failedMessage != null) {
+                            PgTransaction tx = (PgTransaction) failedMessage.getHeaders().get(EventHeaders.EVENT_TX);
+                            if (tx != null) {
+                                tx.rollback();
+                            }
+                        }
+                    }
+                    return null;
+                })
                 .get();
     }
 

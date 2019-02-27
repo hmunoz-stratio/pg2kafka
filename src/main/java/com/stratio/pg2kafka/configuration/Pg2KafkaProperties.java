@@ -21,6 +21,9 @@ public class Pg2KafkaProperties {
     @ToString
     public static class EventsSource {
 
+        private String url;
+        private String username;
+        private String password;
         private String channel;
         private String tableName;
 
