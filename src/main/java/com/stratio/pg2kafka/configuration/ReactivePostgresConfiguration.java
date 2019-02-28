@@ -29,8 +29,6 @@ public class ReactivePostgresConfiguration {
 
     @Bean
     public PgPool postgresClientPool(VertxOptions vertxOptions, PgPoolOptions pgPoolOptions) {
-        VertxOptions options = new VertxOptions();
-        options.setMaxEventLoopExecuteTime(10L * 1000 * 1000000); // 10 seconds
         return PgClient.pool(Vertx.vertx(vertxOptions), pgPoolOptions);
     }
 
