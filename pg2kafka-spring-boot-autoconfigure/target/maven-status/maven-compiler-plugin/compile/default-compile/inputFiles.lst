@@ -1,0 +1,7 @@
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/EventsListenerInboundChannelAdapter.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/Pg2KafkaAutoConfiguration.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/EventToKafkaHandler.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/EventHeaders.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/Event.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/EventCommandsHandler.java
+/mnt/leibniz/work/src/stratio/pg2kafka/pg2kafka-spring-boot-autoconfigure/src/main/java/com/stratio/pg2kafka/autoconfigure/Pg2KafkaProperties.java

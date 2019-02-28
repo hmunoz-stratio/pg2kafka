@@ -1,0 +1,18 @@
+spring:
+  kafka:
+    producer:
+      batch-size: 16384
+      buffer-memory: 33554432
+      retries: 0
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+pg2kafka:
+  events-source:
+    url: postgresql://localhost:5432/postgres?useSSL=false
+    username: docker
+    password: docker
+    channel: events
+    table-name: test.event
+  
+logging.level.com.stratio.pg2kafka: DEBUG

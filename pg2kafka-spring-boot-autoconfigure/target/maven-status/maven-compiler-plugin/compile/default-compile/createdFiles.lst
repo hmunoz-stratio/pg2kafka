@@ -1,0 +1,11 @@
+com/stratio/pg2kafka/autoconfigure/Event.class
+com/stratio/pg2kafka/autoconfigure/Pg2KafkaProperties$EventsSource.class
+META-INF/spring-configuration-metadata.json
+com/stratio/pg2kafka/autoconfigure/Pg2KafkaProperties.class
+com/stratio/pg2kafka/autoconfigure/EventCommandsHandler.class
+com/stratio/pg2kafka/autoconfigure/EventToKafkaHandler.class
+com/stratio/pg2kafka/autoconfigure/Pg2KafkaAutoConfiguration.class
+com/stratio/pg2kafka/autoconfigure/Event$EventData.class
+com/stratio/pg2kafka/autoconfigure/EventsListenerInboundChannelAdapter.class
+com/stratio/pg2kafka/autoconfigure/EventsListenerInboundChannelAdapter$EventHandler.class
+com/stratio/pg2kafka/autoconfigure/EventHeaders.class
