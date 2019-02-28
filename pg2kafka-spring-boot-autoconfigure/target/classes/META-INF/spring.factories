@@ -1,2 +1,0 @@
-org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-com.stratio.pg2kafka.autoconfigure.Pg2KafkaAutoConfiguration

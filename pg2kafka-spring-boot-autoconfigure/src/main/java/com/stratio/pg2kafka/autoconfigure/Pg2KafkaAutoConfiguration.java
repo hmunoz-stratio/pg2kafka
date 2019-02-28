@@ -1,12 +1,12 @@
 package com.stratio.pg2kafka.autoconfigure;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
@@ -34,11 +34,12 @@ import reactor.core.publisher.Mono;
 @Configuration
 @EnableConfigurationProperties(Pg2KafkaProperties.class)
 @EnableIntegration
-@Import(KafkaAutoConfiguration.class)
+@AutoConfigureAfter(KafkaAutoConfiguration.class)
 public class Pg2KafkaAutoConfiguration {
 
     @Autowired
     Pg2KafkaProperties applicationProperties;
+
 
     @Bean
     @ConditionalOnMissingBean
@@ -98,7 +99,7 @@ public class Pg2KafkaAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(name = "eventsListenerFlow")
     public IntegrationFlow eventsListenerFlow(EventCommandsHandler eventCommandsHandler,
             EventToKafkaHandler eventToKafkaHandler, PgPool pgPool) {
         return IntegrationFlows
@@ -110,7 +111,7 @@ public class Pg2KafkaAutoConfiguration {
                     mutableHeaders.put(EventHeaders.EVENT_TX, pgPool.rxBegin().blockingGet());
                     return MessageBuilder.createMessage(payload, mutableHeaders);
                 })
-                .log(Level.DEBUG, Pg2KafkaAutoConfiguration.class.getName())
+                .log(Level.DEBUG, Pg2KafkaAutoConfiguration.class.getName() + ".eventsListenerFlow")
                 .handle(Event.class,
                         (p, h) -> {
                             final long eventId = h.get(EventHeaders.EVENT_ID_HEADER, Long.class);
@@ -142,10 +143,11 @@ public class Pg2KafkaAutoConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(name = "eventRollbackFlow")
     public IntegrationFlow eventRollbackFlow() {
         return IntegrationFlows
                 .from("errorChannel")
+                .log(Level.DEBUG, Pg2KafkaAutoConfiguration.class.getName() + ".eventRollbackFlow")
                 .handle(ErrorMessage.class, (p, h) -> {
                     Throwable throwable = p.getPayload();
                     if (throwable instanceof MessagingException) {

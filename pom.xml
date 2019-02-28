@@ -12,9 +12,8 @@
 
     <modules>
         <module>pg2kafka-spring-boot-autoconfigure</module>
-        <!-- <module>pg2kafka-spring-boot-starter</module> -->
-        <module>pg2kafka-spring-boot-sample-app</module>
         <module>pg2kafka-spring-boot-starter</module>
+        <module>pg2kafka-spring-boot-sample-app</module>
     </modules>
 
 </project>
