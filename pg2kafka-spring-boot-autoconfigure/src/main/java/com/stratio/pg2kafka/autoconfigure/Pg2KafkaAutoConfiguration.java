@@ -93,9 +93,15 @@ public class Pg2KafkaAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public MessageToKafkaTransformer<?> messageToKafkaTransformer() {
+        return s -> s;
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public EventToKafkaHandler eventToKafkaHandler(KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper) {
-        return new EventToKafkaHandler(kafkaTemplate, objectMapper);
+            MessageToKafkaTransformer<?> transformer) {
+        return new EventToKafkaHandler(kafkaTemplate, transformer);
     }
 
     @Bean
