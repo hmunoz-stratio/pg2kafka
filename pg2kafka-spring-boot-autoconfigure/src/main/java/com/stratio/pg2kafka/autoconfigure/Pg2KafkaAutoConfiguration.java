@@ -40,7 +40,6 @@ public class Pg2KafkaAutoConfiguration {
     @Autowired
     Pg2KafkaProperties applicationProperties;
 
-
     @Bean
     @ConditionalOnMissingBean
     public ObjectMapper objectMapper() {
@@ -93,13 +92,13 @@ public class Pg2KafkaAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public MessageToKafkaTransformer<?> messageToKafkaTransformer() {
+    public MessageToKafkaTransformer<Object> messageToKafkaTransformer() {
         return s -> s;
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public EventToKafkaHandler eventToKafkaHandler(KafkaTemplate<String, String> kafkaTemplate,
+    public EventToKafkaHandler eventToKafkaHandler(KafkaTemplate<?, ?> kafkaTemplate,
             MessageToKafkaTransformer<?> transformer) {
         return new EventToKafkaHandler(kafkaTemplate, transformer);
     }

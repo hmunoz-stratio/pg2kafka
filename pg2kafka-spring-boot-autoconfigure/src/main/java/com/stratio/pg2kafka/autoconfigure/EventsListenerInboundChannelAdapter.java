@@ -152,12 +152,12 @@ public class EventsListenerInboundChannelAdapter extends MessageProducerSupport 
 
         private Event toEvent(Row row) {
             try {
-                Event event = new Event();
-                event.setSchema(schemaName);
-                event.setTable(tableName);
-                event.setAction("INSERT");
-                event.setEventData(objectMapper.readValue(row.getString(0), EventData.class));
-                return event;
+                return Event.builder()
+                        .schema(schemaName)
+                        .table(tableName)
+                        .action("INSERT")
+                        .eventData(objectMapper.readValue(row.getString(0), EventData.class))
+                        .build();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
